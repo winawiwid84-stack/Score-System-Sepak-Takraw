@@ -22,6 +22,9 @@ import {
   RotateCcw,
   Trash2,
   UserCheck,
+  Cloud,
+  RefreshCw,
+  Sparkles,
 } from 'lucide-react';
 
 export const AdminDashboard: React.FC = () => {
@@ -38,7 +41,28 @@ export const AdminDashboard: React.FC = () => {
     addCourt,
     deleteCourt,
     clearAllTournamentData,
+    isFirebaseConnected,
+    syncAllToFirebase,
+    isProductionMode,
+    setIsProductionMode,
+    setupOfficialPstiTournament,
   } = useTournament();
+
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const [syncFeedback, setSyncFeedback] = useState<{ text: string; error?: boolean } | null>(null);
+
+  const handleCloudSync = async () => {
+    setIsSyncing(true);
+    setSyncFeedback(null);
+    try {
+      const res = await syncAllToFirebase();
+      setSyncFeedback({ text: res.message, error: false });
+    } catch (e: any) {
+      setSyncFeedback({ text: e?.message || 'Gagal sinkronisasi ke Firebase', error: true });
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   const [activeTab, setActiveTab] = useState<
     'verification' | 'checkin' | 'drawing' | 'schedule' | 'regulations' | 'teams' | 'audit' | 'courts'
@@ -106,7 +130,70 @@ export const AdminDashboard: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Toggle Production vs Demo Mode */}
+          <button
+            onClick={() => {
+              const nextMode = !isProductionMode;
+              if (
+                confirm(
+                  nextMode
+                    ? 'Aktifkan Mode Produksi Resmi? Seluruh bilah simulasi dan login 1-klik akan disembunyikan untuk keperluan turnamen resmi.'
+                    : 'Beralih ke Mode Uji Coba? Menu simulasi demo akan ditampilkan kembali.'
+                )
+              ) {
+                setIsProductionMode(nextMode);
+              }
+            }}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer border ${
+              isProductionMode
+                ? 'bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border-emerald-500/40'
+                : 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border-amber-500/30'
+            }`}
+          >
+            <Shield className="w-3.5 h-3.5" />
+            <span>{isProductionMode ? 'Mode Resmi: AKTIF' : 'Mode Demo: AKTIF'}</span>
+          </button>
+
+          {/* Setup Official PSTI Tournament (Clean Slate) */}
+          <button
+            onClick={async () => {
+              if (
+                confirm(
+                  'Siapkan Turnamen Resmi PSTI Kota Bandung 2026? Tindakan ini akan mengaktifkan Mode Produksi, mengosongkan tim & jadwal sampel, dan menyiapkan kategori resmi di GOR Lodaya.'
+                )
+              ) {
+                setupOfficialPstiTournament();
+                try {
+                  await syncAllToFirebase();
+                  setSyncFeedback({
+                    text: 'Turnamen resmi PSTI Kota Bandung berhasil diinisialisasi dan disimpan ke Firebase Cloud!',
+                    error: false,
+                  });
+                } catch {
+                  setSyncFeedback({
+                    text: 'Turnamen resmi berhasil diinisialisasi lokal.',
+                    error: false,
+                  });
+                }
+              }
+            }}
+            className="flex items-center gap-1.5 px-3 py-2 bg-blue-500/15 hover:bg-blue-500/25 text-blue-300 border border-blue-500/30 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>Mulai Turnamen Resmi (Bersih)</span>
+          </button>
+
+          {/* Sync to Cloud */}
+          <button
+            onClick={handleCloudSync}
+            disabled={isSyncing}
+            className="flex items-center gap-1.5 px-3 py-2 bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 rounded-xl text-xs font-semibold transition-colors disabled:opacity-50 cursor-pointer shadow-sm"
+          >
+            <Cloud className={`w-3.5 h-3.5 ${isSyncing ? 'animate-bounce text-amber-300' : 'text-amber-400'}`} />
+            <span>{isSyncing ? 'Menyinkronkan...' : 'Sinkron ke Cloud'}</span>
+          </button>
+
           <button
             onClick={() => {
               if (
@@ -120,10 +207,31 @@ export const AdminDashboard: React.FC = () => {
             className="flex items-center gap-1.5 px-3 py-2 bg-rose-950/60 hover:bg-rose-900/60 text-rose-300 border border-rose-800/50 rounded-xl text-xs font-semibold transition-colors"
           >
             <Trash2 className="w-3.5 h-3.5" />
-            <span>Kosongkan & Mulai Baru</span>
+            <span>Kosongkan Semua</span>
           </button>
         </div>
       </div>
+
+      {syncFeedback && (
+        <div
+          className={`p-3 rounded-2xl text-xs flex items-center justify-between border ${
+            syncFeedback.error
+              ? 'bg-rose-950/60 border-rose-800 text-rose-200'
+              : 'bg-emerald-950/60 border-emerald-800 text-emerald-200'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <Cloud className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>{syncFeedback.text}</span>
+          </div>
+          <button
+            onClick={() => setSyncFeedback(null)}
+            className="text-[11px] underline opacity-80 hover:opacity-100 cursor-pointer"
+          >
+            Tutup
+          </button>
+        </div>
+      )}
 
       {/* KPI Stats Strip */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">

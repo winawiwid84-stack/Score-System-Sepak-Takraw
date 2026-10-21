@@ -748,7 +748,7 @@ export const INITIAL_MATCHES: Match[] = [
       },
     ],
   },
-  // Match 5: Grup B (SDN 257 Pelita vs SDN 164 Karang Pawulang) - SCHEDULED
+  // Match 5: Grup B (SDN 257 Pelita vs SDN 164 Karang Pawulang) - SEDANG BERLANGSUNG (COURT 2 LIVE)
   {
     id: 'mtc-kdt-05',
     matchCode: 'M-KDT-05',
@@ -763,12 +763,28 @@ export const INITIAL_MATCHES: Match[] = [
     teamHomeId: 'team-kdt-06',
     teamAwayId: 'team-kdt-04',
     scheduledDate: '2026-11-11',
-    scheduledTime: '14:00',
-    status: 'SCHEDULED',
+    scheduledTime: '11:00',
+    status: 'ON_GOING',
     isVerified: false,
     homeSetsWon: 0,
-    awaySetsWon: 0,
-    sets: [],
+    awaySetsWon: 1,
+    serviceSide: 'AWAY',
+    sets: [
+      {
+        setNumber: 1,
+        homeScore: 19,
+        awayScore: 21,
+        isFinished: true,
+        winnerSide: 'AWAY',
+        durationMinutes: 20,
+      },
+      {
+        setNumber: 2,
+        homeScore: 14,
+        awayScore: 12,
+        isFinished: false,
+      },
+    ],
   },
 
   // --- BRACKET MATCHES (PEREMPAT FINAL / QUARTER FINALS) ---

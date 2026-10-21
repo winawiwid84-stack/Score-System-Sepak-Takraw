@@ -1,5 +1,21 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import {
+  collection,
+  doc,
+  setDoc,
+  onSnapshot,
+} from 'firebase/firestore';
+import { onAuthStateChanged } from 'firebase/auth';
+import {
+  auth,
+  db,
+  signInWithGoogle,
+  logOut,
+  OperationType,
+  handleFirestoreError,
+  testFirestoreConnection,
+} from '../firebase';
+import {
   AuditLog,
   Category,
   CategoryRegulation,
@@ -114,6 +130,18 @@ interface TournamentContextType {
   resetPassword: (email: string, newPassword: string) => { success: boolean; message: string };
   checkAccountStatus: (email: string) => User | undefined;
   approveUser: (userId: string) => void;
+
+  // Firebase Cloud & Realtime
+  isFirebaseConnected: boolean;
+  firebaseAuthEmail: string | null;
+  loginWithGoogle: () => Promise<{ success: boolean; message: string; user?: User }>;
+  logoutFirebase: () => Promise<void>;
+  syncAllToFirebase: () => Promise<{ success: boolean; message: string }>;
+
+  // Operational Mode (Production vs Demo)
+  isProductionMode: boolean;
+  setIsProductionMode: (enabled: boolean) => void;
+  setupOfficialPstiTournament: () => void;
 }
 
 const TournamentContext = createContext<TournamentContextType | undefined>(undefined);
@@ -207,6 +235,106 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     localStorage.setItem(STORAGE_KEY_PREFIX + 'current_user', JSON.stringify(currentUser));
   }, [currentUser]);
 
+  // Operational Mode State: Production vs Demo
+  const [isProductionMode, setIsProductionModeState] = useState<boolean>(() => {
+    const saved = localStorage.getItem(STORAGE_KEY_PREFIX + 'production_mode');
+    return saved !== null ? saved === 'true' : false;
+  });
+
+  const setIsProductionMode = (enabled: boolean) => {
+    setIsProductionModeState(enabled);
+    localStorage.setItem(STORAGE_KEY_PREFIX + 'production_mode', String(enabled));
+  };
+
+  // Firebase State & Cloud Integration
+  const [isFirebaseConnected, setIsFirebaseConnected] = useState<boolean>(false);
+  const [firebaseAuthEmail, setFirebaseAuthEmail] = useState<string | null>(null);
+
+  // Connection check on boot
+  useEffect(() => {
+    testFirestoreConnection().then((ok) => {
+      setIsFirebaseConnected(ok);
+    });
+  }, []);
+
+  // Listen to Auth State
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (fbUser) => {
+      if (fbUser) {
+        setFirebaseAuthEmail(fbUser.email);
+        const isAdminEmail = fbUser.email?.toLowerCase() === 'istihadj@gmail.com';
+        const existing = users.find((u) => u.email.toLowerCase() === fbUser.email?.toLowerCase());
+        if (existing) {
+          const updated = {
+            ...existing,
+            role: isAdminEmail ? ('ADMIN' as UserRole) : existing.role,
+            isApproved: isAdminEmail ? true : existing.isApproved,
+          };
+          setCurrentUserState(updated);
+        } else {
+          const newUser: User = {
+            id: fbUser.uid,
+            email: fbUser.email || '',
+            fullName: fbUser.displayName || fbUser.email?.split('@')[0] || 'Pengguna Google',
+            role: isAdminEmail ? 'ADMIN' : 'UMUM',
+            isApproved: true,
+            registeredAt: new Date().toISOString(),
+          };
+          setUsersState((prev) => [...prev, newUser]);
+          setCurrentUserState(newUser);
+        }
+      } else {
+        setFirebaseAuthEmail(null);
+      }
+    });
+    return () => unsub();
+  }, [users]);
+
+  // Realtime Firestore listeners
+  useEffect(() => {
+    try {
+      const unsub = onSnapshot(collection(db, 'matches'), (snapshot) => {
+        if (!snapshot.empty) {
+          const remoteMatches: Match[] = [];
+          snapshot.forEach((docSnap) => {
+            remoteMatches.push(docSnap.data() as Match);
+          });
+          if (remoteMatches.length > 0) {
+            setMatchesState((prev) => {
+              const map = new Map(prev.map(m => [m.id, m]));
+              remoteMatches.forEach(rm => map.set(rm.id, rm));
+              return Array.from(map.values());
+            });
+          }
+        }
+      }, (error) => {
+        handleFirestoreError(error, OperationType.LIST, 'matches');
+      });
+
+      return () => unsub();
+    } catch {
+      // offline fallback
+    }
+  }, []);
+
+  // Persist helper for matches
+  const persistMatchToFirestore = async (match: Match) => {
+    try {
+      await setDoc(doc(db, 'matches', match.id), match, { merge: true });
+    } catch (err) {
+      console.warn('Firestore match persist:', err);
+    }
+  };
+
+  // Persist helper for teams
+  const persistTeamToFirestore = async (team: Team) => {
+    try {
+      await setDoc(doc(db, 'teams', team.id), team, { merge: true });
+    } catch (err) {
+      console.warn('Firestore team persist:', err);
+    }
+  };
+
   // Helper: Append Audit Log
   const recordAudit = (action: Omit<AuditLog, 'id' | 'timestamp' | 'performedBy' | 'userRole'>) => {
     const newLog: AuditLog = {
@@ -279,6 +407,192 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       entityName: 'Sistem Turnamen',
       entityId: emptyTournament.id,
       reason: 'Panitia menghapus semua data demo dan memulai turnamen kosong.',
+    });
+  };
+
+  const setupOfficialPstiTournament = () => {
+    setIsProductionMode(true);
+
+    const officialTournament: Tournament = {
+      id: 'trn-psti-bdg-2026',
+      slug: 'kejuaraan-sepak-takraw-psti-kota-bandung-2026',
+      name: 'Kejuaraan Sepak Takraw PSTI Kota Bandung 2026',
+      organizer: 'Pengurus Cabang PSTI Kota Bandung bekerjasama dengan Dispora Kota Bandung',
+      location: 'GOR Sepak Takraw, Lodaya Bandung',
+      startDate: '2026-11-10',
+      endDate: '2026-11-14',
+      description:
+        'Kejuaraan resmi Sepak Takraw PSTI Kota Bandung tahun 2026 tingkat Kadet dan Junior dengan regulasi resmi ISTAF (International Sepaktakraw Federation).',
+      bannerUrl: '/src/assets/images/hero_sepak_takraw_banner_1792478380267.jpg',
+      isPublished: true,
+      contactPerson: 'Sekretariat PSTI Kota Bandung: Drs. H. Suryana',
+      contactPhone: '+62 812-3456-7890',
+    };
+
+    const officialCategories: Category[] = [
+      {
+        id: 'cat-kdt-pa',
+        tournamentId: officialTournament.id,
+        name: 'Inter-Regu Kadet Putra (U-15)',
+        ageGroup: 'Kadet',
+        gender: 'PUTRA',
+        maxTeams: 16,
+        groupCount: 4,
+        advancingPerGroup: 2,
+        isDrawLocked: false,
+        regulation: {
+          numberOfSets: 3,
+          targetPointsPerSet: 15,
+          deuceEnabled: true,
+          deuceMaxPoints: 17,
+          tiebreakPoints: 15,
+          bronzeMatchFormat: 'SHARED',
+          pointsWin: 2,
+          pointsLoss: 0,
+          pointsWalkoverWin: 2,
+          pointsWalkoverLoss: 0,
+          tieBreakerOrder: [
+            'POINTS',
+            'HEAD_TO_HEAD',
+            'SET_DIFFERENCE',
+            'SET_RATIO',
+            'POINT_DIFFERENCE',
+            'POINT_RATIO',
+          ],
+          minPlayersPerTeam: 3,
+          maxPlayersPerTeam: 5,
+        },
+      },
+      {
+        id: 'cat-kdt-pi',
+        tournamentId: officialTournament.id,
+        name: 'Inter-Regu Kadet Putri (U-15)',
+        ageGroup: 'Kadet',
+        gender: 'PUTRI',
+        maxTeams: 12,
+        groupCount: 4,
+        advancingPerGroup: 2,
+        isDrawLocked: false,
+        regulation: {
+          numberOfSets: 3,
+          targetPointsPerSet: 15,
+          deuceEnabled: true,
+          deuceMaxPoints: 17,
+          tiebreakPoints: 15,
+          bronzeMatchFormat: 'SHARED',
+          pointsWin: 2,
+          pointsLoss: 0,
+          pointsWalkoverWin: 2,
+          pointsWalkoverLoss: 0,
+          tieBreakerOrder: [
+            'POINTS',
+            'HEAD_TO_HEAD',
+            'SET_DIFFERENCE',
+            'SET_RATIO',
+            'POINT_DIFFERENCE',
+            'POINT_RATIO',
+          ],
+          minPlayersPerTeam: 3,
+          maxPlayersPerTeam: 5,
+        },
+      },
+      {
+        id: 'cat-jnr-pa',
+        tournamentId: officialTournament.id,
+        name: 'Inter-Regu Junior Putra (U-18)',
+        ageGroup: 'Junior',
+        gender: 'PUTRA',
+        maxTeams: 16,
+        groupCount: 4,
+        advancingPerGroup: 2,
+        isDrawLocked: false,
+        regulation: {
+          numberOfSets: 3,
+          targetPointsPerSet: 15,
+          deuceEnabled: true,
+          deuceMaxPoints: 17,
+          tiebreakPoints: 15,
+          bronzeMatchFormat: 'MATCH',
+          pointsWin: 2,
+          pointsLoss: 0,
+          pointsWalkoverWin: 2,
+          pointsWalkoverLoss: 0,
+          tieBreakerOrder: [
+            'POINTS',
+            'HEAD_TO_HEAD',
+            'SET_DIFFERENCE',
+            'SET_RATIO',
+            'POINT_DIFFERENCE',
+            'POINT_RATIO',
+          ],
+          minPlayersPerTeam: 3,
+          maxPlayersPerTeam: 5,
+        },
+      },
+      {
+        id: 'cat-jnr-pi',
+        tournamentId: officialTournament.id,
+        name: 'Inter-Regu Junior Putri (U-18)',
+        ageGroup: 'Junior',
+        gender: 'PUTRI',
+        maxTeams: 12,
+        groupCount: 4,
+        advancingPerGroup: 2,
+        isDrawLocked: false,
+        regulation: {
+          numberOfSets: 3,
+          targetPointsPerSet: 15,
+          deuceEnabled: true,
+          deuceMaxPoints: 17,
+          tiebreakPoints: 15,
+          bronzeMatchFormat: 'SHARED',
+          pointsWin: 2,
+          pointsLoss: 0,
+          pointsWalkoverWin: 2,
+          pointsWalkoverLoss: 0,
+          tieBreakerOrder: [
+            'POINTS',
+            'HEAD_TO_HEAD',
+            'SET_DIFFERENCE',
+            'SET_RATIO',
+            'POINT_DIFFERENCE',
+            'POINT_RATIO',
+          ],
+          minPlayersPerTeam: 3,
+          maxPlayersPerTeam: 5,
+        },
+      },
+    ];
+
+    const officialCourts: Court[] = [
+      {
+        id: 'crt-01',
+        tournamentId: officialTournament.id,
+        name: 'Lapangan 1 (Center Court)',
+        locationDesc: 'Hall Utama Tribun Timur GOR Lodaya Bandung',
+        isActive: true,
+      },
+      {
+        id: 'crt-02',
+        tournamentId: officialTournament.id,
+        name: 'Lapangan 2 (Karpet Hijau)',
+        locationDesc: 'Hall Sayap Barat GOR Lodaya Bandung',
+        isActive: true,
+      },
+    ];
+
+    setTournamentState(officialTournament);
+    setCategoriesState(officialCategories);
+    setCourtsState(officialCourts);
+    setTeamsState([]);
+    setGroupsState([]);
+    setMatchesState([]);
+
+    recordAudit({
+      actionType: 'REGULATION_UPDATED',
+      entityName: 'Inisialisasi Kejuaraan Resmi',
+      entityId: officialTournament.id,
+      reason: 'Panitia menginisialisasi turnamen resmi PSTI Kota Bandung 2026 di GOR Lodaya Bandung tanpa data demo.',
     });
   };
 
@@ -708,7 +1022,14 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   const updateMatch = (matchId: string, data: Partial<Match>) => {
-    setMatchesState((prev) => prev.map((m) => (m.id === matchId ? { ...m, ...data } : m)));
+    setMatchesState((prev) => {
+      const next = prev.map((m) => (m.id === matchId ? { ...m, ...data } : m));
+      const updatedMatch = next.find((m) => m.id === matchId);
+      if (updatedMatch) {
+        persistMatchToFirestore(updatedMatch);
+      }
+      return next;
+    });
   };
 
   const assignReferee = (matchId: string, refereeId: string, refereeName: string) => {
@@ -1074,6 +1395,93 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     });
   };
 
+  const loginWithGoogle = async () => {
+    try {
+      const cred = await signInWithGoogle();
+      const fbUser = cred.user;
+      const isAdminEmail = fbUser.email?.toLowerCase() === 'istihadj@gmail.com';
+      const existing = users.find((u) => u.email.toLowerCase() === fbUser.email?.toLowerCase());
+      let activeUser: User;
+      if (existing) {
+        activeUser = {
+          ...existing,
+          role: isAdminEmail ? 'ADMIN' : existing.role,
+          isApproved: isAdminEmail ? true : existing.isApproved,
+        };
+        setCurrentUserState(activeUser);
+      } else {
+        activeUser = {
+          id: fbUser.uid,
+          email: fbUser.email || '',
+          fullName: fbUser.displayName || fbUser.email?.split('@')[0] || 'Pengguna Google',
+          role: isAdminEmail ? 'ADMIN' : 'UMUM',
+          isApproved: true,
+          registeredAt: new Date().toISOString(),
+        };
+        setUsersState((prev) => [...prev, activeUser]);
+        setCurrentUserState(activeUser);
+      }
+
+      try {
+        await setDoc(doc(db, 'users', activeUser.id), activeUser, { merge: true });
+      } catch (writeErr) {
+        console.warn('Could not sync user profile to Firestore:', writeErr);
+      }
+
+      recordAudit({
+        actionType: 'TEAM_STATUS_CHANGED',
+        entityName: `Login Google Firebase: ${activeUser.fullName}`,
+        entityId: activeUser.id,
+        reason: 'Pengguna berhasil masuk melalui Firebase Google Authentication.',
+      });
+
+      return { success: true, message: `Berhasil masuk sebagai ${activeUser.fullName}`, user: activeUser };
+    } catch (err) {
+      return { success: false, message: err instanceof Error ? err.message : 'Gagal login dengan Google' };
+    }
+  };
+
+  const logoutFirebase = async () => {
+    try {
+      await logOut();
+      setFirebaseAuthEmail(null);
+      const guestUser = users.find((u) => u.role === 'UMUM') || INITIAL_USERS[3];
+      setCurrentUserState(guestUser);
+    } catch (err) {
+      console.warn('Firebase logout error:', err);
+    }
+  };
+
+  const syncAllToFirebase = async () => {
+    try {
+      await setDoc(doc(db, 'tournaments', tournament.id), tournament, { merge: true });
+      for (const t of teams) {
+        await setDoc(doc(db, 'teams', t.id), t, { merge: true });
+      }
+      for (const m of matches) {
+        await setDoc(doc(db, 'matches', m.id), m, { merge: true });
+      }
+      for (const c of categories) {
+        await setDoc(doc(db, 'categories', c.id), c, { merge: true });
+      }
+      for (const crt of courts) {
+        await setDoc(doc(db, 'courts', crt.id), crt, { merge: true });
+      }
+
+      recordAudit({
+        actionType: 'REGULATION_UPDATED',
+        entityName: 'Sinkronisasi Cloud Firebase',
+        entityId: tournament.id,
+        reason: 'Sinkronisasi seluruh data turnamen ke cloud Firestore berhasil.',
+      });
+
+      setIsFirebaseConnected(true);
+      return { success: true, message: 'Seluruh data turnamen berhasil disinkronkan ke Firebase Firestore!' };
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, 'tournaments/' + tournament.id);
+    }
+  };
+
   return (
     <TournamentContext.Provider
       value={{
@@ -1126,6 +1534,14 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         resetPassword,
         checkAccountStatus,
         approveUser,
+        isFirebaseConnected,
+        firebaseAuthEmail,
+        loginWithGoogle,
+        logoutFirebase,
+        syncAllToFirebase,
+        isProductionMode,
+        setIsProductionMode,
+        setupOfficialPstiTournament,
       }}
     >
       {children}

@@ -33,7 +33,35 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigateTab }) => {
     registerAccount,
     resetPassword,
     checkAccountStatus,
+    loginWithGoogle,
+    logoutFirebase,
+    isFirebaseConnected,
+    firebaseAuthEmail,
+    isProductionMode,
+    setIsProductionMode,
   } = useTournament();
+
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
+
+  const handleGoogleSignIn = async () => {
+    setIsGoogleLoading(true);
+    setLoginError('');
+    setLoginSuccess('');
+    const res = await loginWithGoogle();
+    setIsGoogleLoading(false);
+    if (!res.success) {
+      setLoginError(res.message);
+    } else {
+      setLoginSuccess(res.message);
+      setTimeout(() => {
+        if (res.user?.role === 'ADMIN') onNavigateTab('admin');
+        else if (res.user?.role === 'WASIT') onNavigateTab('wasit');
+        else if (res.user?.role === 'PELATIH') onNavigateTab('pelatih');
+        else if (res.user?.role === 'ATLET') onNavigateTab('atlet');
+        else onNavigateTab('home');
+      }, 700);
+    }
+  };
 
   const isGuest = currentUser.role === 'UMUM' && currentUser.id.startsWith('usr-guest');
   const isLoggedIn = !isGuest && currentUser.id;
@@ -373,8 +401,40 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigateTab }) => {
                   <span>Masuk ke Akun Anda</span>
                 </h2>
                 <p className="text-xs text-slate-400 mt-1">
-                  Masukkan email dan kata sandi akun resmi Anda untuk mengelola turnamen.
+                  Masukkan email dan kata sandi akun resmi Anda atau gunakan login Google Firebase.
                 </p>
+              </div>
+
+              {/* Cloud DB Status Card */}
+              <div className="flex items-center justify-between p-3 rounded-xl bg-slate-950 border border-slate-800 text-xs">
+                <div className="flex items-center gap-2">
+                  <span className={`w-2 h-2 rounded-full ${isFirebaseConnected ? 'bg-emerald-400 animate-pulse' : 'bg-emerald-500'}`}></span>
+                  <span className="text-slate-300 font-medium">Cloud Database:</span>
+                  <span className="text-amber-400 font-semibold">Firebase Firestore</span>
+                </div>
+                <span className="text-[11px] text-slate-500 font-mono">gifted-cascade-4t3g1</span>
+              </div>
+
+              {/* Google Firebase Login Button */}
+              <button
+                type="button"
+                onClick={handleGoogleSignIn}
+                disabled={isGoogleLoading}
+                className="w-full flex items-center justify-center gap-2.5 py-2.5 px-4 bg-slate-950 hover:bg-slate-900 border border-slate-700 hover:border-slate-600 rounded-xl text-xs font-bold text-white transition-all shadow-sm cursor-pointer disabled:opacity-50"
+              >
+                <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
+                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+                </svg>
+                <span>{isGoogleLoading ? 'Menghubungkan...' : 'Masuk dengan Google (Firebase Auth)'}</span>
+              </button>
+
+              <div className="relative flex py-1 items-center">
+                <div className="flex-grow border-t border-slate-800"></div>
+                <span className="flex-shrink mx-3 text-[11px] text-slate-500 uppercase tracking-wider font-semibold">atau dengan akun terdaftar</span>
+                <div className="flex-grow border-t border-slate-800"></div>
               </div>
 
               {loginError && (
@@ -867,53 +927,128 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onNavigateTab }) => {
           )}
         </div>
 
-        {/* Right Column: Quick Demo Accounts & Security Info (5 cols) */}
+        {/* Right Column: Production Official Notice OR Quick Demo Accounts (5 cols) */}
         <div className="lg:col-span-5 space-y-6">
-          {/* Quick Demo Login Cards */}
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl space-y-4">
-            <div className="flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-amber-400" />
-              <h3 className="text-sm font-bold text-white">Akses Cepat Akun Demo (1-Klik)</h3>
-            </div>
-            <p className="text-xs text-slate-400 leading-relaxed">
-              Klik salah satu akun di bawah ini untuk langsung masuk dan menguji antarmuka sistem sesuai hak aksesnya:
-            </p>
+          {isProductionMode ? (
+            /* Production Mode: Official PSTI System Notice */
+            <div className="bg-slate-900 border border-emerald-900/50 rounded-3xl p-6 shadow-xl space-y-4">
+              <div className="flex items-center gap-2">
+                <Shield className="w-5 h-5 text-emerald-400" />
+                <h3 className="text-sm font-bold text-white">Sistem Resmi PSTI Kota Bandung</h3>
+              </div>
 
-            <div className="space-y-2.5">
-              {demoAccounts.map((acc) => {
-                const Icon = acc.icon;
-                const isSelected = currentUser.email === acc.email;
+              <div className="p-3 bg-emerald-950/40 border border-emerald-800/40 rounded-2xl text-xs text-emerald-200 space-y-1">
+                <span className="font-bold flex items-center gap-1.5 text-emerald-300">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+                  Mode Produksi Aktif (Non-Demo)
+                </span>
+                <p className="text-[11px] text-slate-300 leading-relaxed mt-1">
+                  Sistem beroperasi untuk turnamen sesungguhnya di GOR Sepak Takraw Lodaya Bandung. Akses 1-klik tanpa kata sandi dinonaktifkan demi integritas data dan keamanan hasil pertandingan.
+                </p>
+              </div>
 
-                return (
+              <div className="space-y-3 text-xs text-slate-300 pt-1">
+                <div className="flex items-start gap-2.5">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold text-white block">Admin & Panitia Pengcab</span>
+                    <span className="text-[11px] text-slate-400">
+                      Gunakan Google Login resmi atau email panitia yang telah disetujui.
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-2.5">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold text-white block">Wasit Pertandingan</span>
+                    <span className="text-[11px] text-slate-400">
+                      Wajib mendaftar dengan nomor lisensi resmi dan menunggu persetujuan Admin Pengcab.
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-2.5">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold text-white block">Pelatih / Manajer Regu</span>
+                    <span className="text-[11px] text-slate-400">
+                      Mendaftar akun kontingen untuk mengajukan formasi atlet dan memantau status verifikasi.
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {currentUser.role === 'ADMIN' && (
+                <div className="pt-2 border-t border-slate-800">
                   <button
-                    key={acc.email}
-                    onClick={() => handleQuickLogin(acc)}
-                    className={`w-full p-3 rounded-2xl border text-left flex items-center justify-between transition-all group ${
-                      isSelected
-                        ? 'border-amber-400 bg-amber-500/10 shadow-md'
-                        : 'border-slate-800 bg-slate-950/70 hover:border-slate-700 hover:bg-slate-950'
-                    }`}
+                    onClick={() => {
+                      if (confirm('Beralih sementara ke Mode Uji Coba (Demo)?')) {
+                        setIsProductionMode(false);
+                      }
+                    }}
+                    className="w-full py-2 bg-slate-950 hover:bg-slate-800 text-slate-400 hover:text-amber-300 text-xs font-medium rounded-xl border border-slate-800 transition-colors"
                   >
-                    <div className="flex items-center gap-3">
-                      <div className={`w-9 h-9 rounded-xl border flex items-center justify-center shrink-0 ${acc.color}`}>
-                        <Icon className="w-4 h-4" />
-                      </div>
-                      <div>
-                        <div className="font-bold text-xs text-white group-hover:text-amber-300 transition-colors">
-                          {acc.name}
-                        </div>
-                        <div className="text-[10px] text-slate-400">
-                          {acc.label} · <span className="font-mono text-slate-500">{acc.email}</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <ArrowRight className="w-4 h-4 text-slate-500 group-hover:text-amber-400 transition-colors shrink-0" />
+                    Buka Mode Uji Coba (Simulasi Demo)
                   </button>
-                );
-              })}
+                </div>
+              )}
             </div>
-          </div>
+          ) : (
+            /* Demo Mode: Quick Demo Login Cards */
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-xl space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-amber-400" />
+                  <h3 className="text-sm font-bold text-white">Akses Cepat Akun Demo (1-Klik)</h3>
+                </div>
+                <button
+                  onClick={() => setIsProductionMode(true)}
+                  className="text-[10px] text-emerald-400 hover:underline font-semibold"
+                >
+                  Tutup Demo
+                </button>
+              </div>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Klik salah satu akun di bawah ini untuk langsung masuk dan menguji antarmuka sistem sesuai hak aksesnya:
+              </p>
+
+              <div className="space-y-2.5">
+                {demoAccounts.map((acc) => {
+                  const Icon = acc.icon;
+                  const isSelected = currentUser.email === acc.email;
+
+                  return (
+                    <button
+                      key={acc.email}
+                      onClick={() => handleQuickLogin(acc)}
+                      className={`w-full p-3 rounded-2xl border text-left flex items-center justify-between transition-all group ${
+                        isSelected
+                          ? 'border-amber-400 bg-amber-500/10 shadow-md'
+                          : 'border-slate-800 bg-slate-950/70 hover:border-slate-700 hover:bg-slate-950'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className={`w-9 h-9 rounded-xl border flex items-center justify-center shrink-0 ${acc.color}`}>
+                          <Icon className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <div className="font-bold text-xs text-white group-hover:text-amber-300 transition-colors">
+                            {acc.name}
+                          </div>
+                          <div className="text-[10px] text-slate-400">
+                            {acc.label} · <span className="font-mono text-slate-500">{acc.email}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <ArrowRight className="w-4 h-4 text-slate-500 group-hover:text-amber-400 transition-colors shrink-0" />
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Security & RBAC Guidelines */}
           <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-5 text-xs text-slate-400 space-y-2">
